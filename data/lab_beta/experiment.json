@@ -1,0 +1,9 @@
+{
+  "lab": "Beta Screening Facility",
+  "operator": "J. Smith",
+  "instrument": "PHERAstar FSX",
+  "screening_date": "20-03-2024",
+  "target": "USP30",
+  "assay_type": "Biochemical IC50",
+  "notes": "Single-point screen at 100 nM equivalent. QC cutoff inhibition > 30%."
+}

@@ -1,0 +1,58 @@
+
+services:
+  pgdatabase:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: researchlab
+      POSTGRES_PASSWORD: researchlab
+      POSTGRES_DB: oxresearch
+    volumes:
+      - laboratory_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    networks:
+      - pgd-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U researchlab -d oxresearch"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8085:80"
+    networks:
+      - pgd-network
+
+
+  ingestion_pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ingestion_pipeline
+    environment:
+      - PG_USER=researchlab
+      - PG_PASSWORD=researchlab
+      - PG_HOST=pgdatabase
+      - PG_PORT=5432
+      - PG_DB=oxresearch
+    depends_on:
+     pgdatabase:
+      condition: service_healthy
+    networks:
+      - pgd-network
+      
+
+volumes:
+  laboratory_data:
+  pgadmin_data:
+
+networks:
+  pgd-network:
