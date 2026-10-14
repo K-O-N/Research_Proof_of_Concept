@@ -1,0 +1,13 @@
+compound_id,compound_name,smiles
+ALF-001,USP30-INH-001,Cc1ccc(NC(=O)c2ccc(Cl)s2)cc1
+ALF-002,USP30-INH-002,COc1ccc(C(=O)Nc2cccc(F)c2)cc1
+ALF-003,USP30-INH-003 ,O=C(Nc1ccncc1)c1ccc(Br)cc1
+ALF-004,USP30-INH-004,Cc1nc2ccccc2s1NC(=O)c1ccccc1
+ALF-005,USP30-INH-005,O=C(NCc1ccccc1)c1cccc(Cl)c1
+ALF-006,USP30-INH-006,CN1CCN(c2ccc(NC(=O)c3ccc(F)cc3)cc2)CC1
+ALF-007,USP30-INH-007,O=S(=O)(Nc1ccc(F)cc1)c1ccccc1
+ALF-008,USP30-INH-008,Cc1ccc(S(=O)(=O)Nc2ccc(Cl)cc2)cc1
+ALF-009,USP30-INH-009,O=C(O)c1ccc(NC(=O)c2cccs2)cc1
+ALF-010,USP30-INH-010,Cc1ccc(NC2=NC(=O)c3ccccc32)cc1
+ALF-011,USP30-INH-011,
+ALF-003,USP30-INH-003 ,O=C(Nc1ccncc1)c1ccc(Br)cc1
