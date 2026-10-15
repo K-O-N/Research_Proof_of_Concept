@@ -29,7 +29,7 @@ The current database connection uses:
 - Host: `pgdatabase`
 - Port: `5432`
 
-Configure credentials through environment variables or your existing local configuration. Do not commit real credentials to Git.
+Configure credentials through environment variables or your existing local configuration. 
 
 ### 3. Build and start PostgreSQL
 
@@ -44,14 +44,20 @@ Wait until PostgreSQL is ready before running the pipeline.
 
 Run the existing ingestion and cleaning scripts in the order defined by the repository to load the laboratory data into the staging schema.
 
-### 5. Load the Gold model
+### 5. Access PgAdmin
+You should now be able to load pgAdmin on a web browser by browsing to http://localhost:8085. Use the same email and password you used for running the container to log in.
 
-Run the Gold loader using the appropriate Compose service:
-
-```bash
-docker compose run --rm <pipeline-service> \
-  python <path-to-gold-loader>
-```
+- Open browser and go to http://localhost:8085
+- Login with email: admin@admin.com, password: root
+- Right-click "Servers" → Register → Server
+- Configure:
+  1. General tab: Name: Local Docker
+  2. Connection tab:
+     - Host: pgddatabase (the container name)
+     - Port: 5432
+     - Username: researchlab
+     - Password: researchlab
+- Save. Now you can explore and query data
 
 Replace the placeholders with the actual service name and loader path in your repository.
 
