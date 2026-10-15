@@ -35,7 +35,7 @@ Configure credentials through environment variables or your existing local confi
 
 ```bash
 docker compose build
-docker compose up -d pgdatabase
+docker compose up 
 ```
 
 Wait until PostgreSQL is ready before running the pipeline.
