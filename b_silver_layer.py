@@ -4,6 +4,8 @@ import sqlalchemy
 import psycopg2
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 
 from sqlalchemy import URL, create_engine, inspect, text
 
@@ -13,8 +15,20 @@ TARGET_SCHEMA = "staging"
 
 
 # Create a SQLAlchemy engine for PostgreSQL using psycopg2
+# def get_engine():
+#     return create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+
 def get_engine():
-    return create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+    return create_engine(
+        URL.create(
+            "postgresql+psycopg2",
+            username=os.getenv("PG_USER"),
+            password=os.getenv("PG_PASSWORD"),
+            host="pgdatabase",
+            port=5432,
+            database=os.getenv("PG_DB", "oxresearch"),
+        )
+    )
 
 
 # Clean column names to lowercase snake_case and remove special characters

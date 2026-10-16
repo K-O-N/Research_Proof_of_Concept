@@ -1,16 +1,28 @@
-
+import os
 import json 
 import pandas as pd
 import sqlalchemy
 import psycopg2
-from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text, URL
+
+load_dotenv()
 
 
 
 # engine = create_engine('postgresql://researchlab:researchlab@localhost:5432/oxresearch')
 
 # Switch to using the service name defined in docker-compose.yaml for the database host 
-engine = create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+#engine = create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+
+user = os.getenv("PG_USER")
+password = os.getenv("PG_PASSWORD")
+host = os.getenv("PG_HOST", "pgdatabase")
+port = os.getenv("PG_PORT", 5432)
+db = os.getenv("PG_DB", "oxresearch")
+
+database_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+engine = create_engine(database_url)
 
 
 
@@ -90,9 +102,4 @@ for lab, files in datasets.items():
             print(f"Error loading {file_path}: {e}")
 
 print("\nRaw data ingestion complete!")
-
-
-
-
-
 

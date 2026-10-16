@@ -1,16 +1,28 @@
 import json
 import os
+import pandas as pd
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from dotenv import load_dotenv
+load_dotenv()
 
-import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, URL
+
 
 TARGET_SCHEMA = "gold"
 STAGING_SCHEMA = "staging"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch',)
+# DATABASE_URL = os.getenv(
+#     "DATABASE_URL",
+#     'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch',)
+
+DATABASE_URL = URL.create(
+    "postgresql+psycopg2",
+    username=os.getenv("PG_USER"),
+    password=os.getenv("PG_PASSWORD"),
+    host="pgdatabase",
+    port=5432,
+    database=os.getenv("PG_DB", "oxresearch"),
+)
 
 
 
