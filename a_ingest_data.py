@@ -24,10 +24,11 @@ with engine.connect() as conn:
 
 
 
-# Define file paths and load configurations
-# Adjust the base path to point to where your lab folders are stored locally
-base_path = "./data"  # Change this to your actual data directory 
+# Define the data file paths  
+base_path = "./data"  
 
+
+# Define the datasets and their corresponding file paths for each lab
 datasets = {
     "lab_alpha": {
         "compounds": f"{base_path}/lab_alpha/compounds.csv",
@@ -46,6 +47,7 @@ datasets = {
     },
 }
 
+
 # Ingest raw data into PostgreSQL tables
 for lab, files in datasets.items():
     print(f"\n--- Ingesting {lab} ---")
@@ -57,25 +59,29 @@ for lab, files in datasets.items():
             elif file_path.endswith(".tsv"):
                 df = pd.read_csv(file_path, sep="\t")
             elif file_path.endswith(".json"):
-                # Read JSON safely whether it's a dict/metadata or a list of records
+                # Try reading the JSON file normally using pandas
                 try:
                     df = pd.read_json(file_path)
                 except ValueError:
-                    # Fallback for scalar/flat dictionary metadata files
+
+                    # Fallback: if standard pandas read fails (common with flat key-value metadata dictionaries), 
+                    # read the file manually using Python's standard json library
                     with open(file_path, "r") as f:
                         data = json.load(f)
-                    # If it's a single dictionary, wrap it in a list so it forms a 1-row DataFrame
+
+                    # If it's a single dictionary, wrap it in a list so Pandas can successfully form a clean 1-row DataFrame
                     if isinstance(data, dict):
                         df = pd.DataFrame([data])
                     else:
+                        # Otherwise, assume it's already a list of records and load it directly
                         df = pd.DataFrame(data)
 
-            # Load into database Raw layer
+            # Load into database Raw layer; Overwrite table on re-runs during development
             df.to_sql(
                 name=table_name,
                 con=engine,
                 schema=lab,
-                if_exists="replace",  # Overwrite table on re-runs during development
+                if_exists="replace",  
                 index=False
             )
             print(f"Loaded {file_path} -> {lab}.{table_name} ({len(df)} rows)")
