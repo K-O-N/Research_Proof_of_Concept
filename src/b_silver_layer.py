@@ -15,8 +15,7 @@ TARGET_SCHEMA = "staging"
 
 
 # Create a SQLAlchemy engine for PostgreSQL using psycopg2
-# def get_engine():
-#     return create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+
 
 def get_engine():
     return create_engine(

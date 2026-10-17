@@ -11,9 +11,7 @@ from sqlalchemy import create_engine, text, URL
 
 TARGET_SCHEMA = "gold"
 STAGING_SCHEMA = "staging"
-# DATABASE_URL = os.getenv(
-#     "DATABASE_URL",
-#     'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch',)
+
 
 DATABASE_URL = URL.create(
     "postgresql+psycopg2",

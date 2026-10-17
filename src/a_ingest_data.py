@@ -10,10 +10,7 @@ load_dotenv()
 
 
 
-# engine = create_engine('postgresql://researchlab:researchlab@localhost:5432/oxresearch')
 
-# Switch to using the service name defined in docker-compose.yaml for the database host 
-#engine = create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
 
 user = os.getenv("PG_USER")
 password = os.getenv("PG_PASSWORD")
