@@ -42,7 +42,10 @@ Wait until PostgreSQL is ready before running the pipeline.
 
 ### 4. Run ingestion and cleaning
 
-Run the existing ingestion and cleaning scripts in the order defined by the repository to load the laboratory data into the staging schema.
+These scripts run by default. I would advise you do not run docker iteratively; so you see the outcome. To run the ingestion pipeline including the ingestion, transformation, and gold scripts 
+```
+docker compose run ingestion_pipeline
+```
 
 ### 5. Access PgAdmin
 You should now be able to load pgAdmin on a web browser by browsing to http://localhost:8085. Use the same email and password you used for running the container to log in.
@@ -58,8 +61,6 @@ You should now be able to load pgAdmin on a web browser by browsing to http://lo
      - Username: researchlab
      - Password: researchlab
 - Save. Now you can explore and query data
-
-Replace the placeholders with the actual service name and loader path in your repository.
 
 ### 6. Verify the results
 
@@ -95,3 +96,5 @@ To remove the database volume and its persisted data, use `docker compose down -
 ## Notes
 
 This is a proof of concept. Review the project documentation for the architecture, source mappings, assumptions, data-quality rules, limitations and validation requirements.
+## File ERD
+![](ERD.png)
