@@ -3,9 +3,9 @@ services:
   pgdatabase:
     image: postgres:18
     environment:
-      POSTGRES_USER: researchlab
-      POSTGRES_PASSWORD: researchlab
-      POSTGRES_DB: oxresearch
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - laboratory_data:/var/lib/postgresql
     ports:
@@ -13,7 +13,7 @@ services:
     networks:
       - pgd-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U researchlab -d oxresearch"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 5
@@ -22,8 +22,8 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: root
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     ports:
@@ -38,11 +38,11 @@ services:
       dockerfile: Dockerfile
     container_name: ingestion_pipeline
     environment:
-      - PG_USER=researchlab
-      - PG_PASSWORD=researchlab
+      - PG_USER=${POSTGRES_USER}
+      - PG_PASSWORD=${POSTGRES_PASSWORD}
       - PG_HOST=pgdatabase
       - PG_PORT=5432
-      - PG_DB=oxresearch
+      - PG_DB=${POSTGRES_DB}
     depends_on:
      pgdatabase:
       condition: service_healthy

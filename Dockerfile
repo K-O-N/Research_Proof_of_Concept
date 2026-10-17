@@ -7,10 +7,9 @@ ENV PATH="/code/.venv/bin:$PATH"
 COPY pyproject.toml .python-version uv.lock ./
 RUN uv sync --locked
 
-COPY a_ingest_data.py .
-COPY b_silver_layer.py .
-COPY c_gold_layer.py .
-COPY d_run_all.py .
+
+COPY unit_tests/ ./unit_tests/
+COPY src/ ./src/
 COPY data/ ./data/
 
-ENTRYPOINT ["python", "d_run_all.py" ]
+ENTRYPOINT ["python", "src/d_run_all.py" ]

@@ -8,6 +8,7 @@ dependencies = [
     "pandas>=3.0.6",
     "psycopg2-binary>=2.9.13",
     "pyarrow>=26.0.0",
+    "python-dotenv>=1.2.4",
     "sqlalchemy>=2.1.4",
 ]
 
@@ -15,4 +16,5 @@ dependencies = [
 dev = [
     "jupyter>=1.1.1",
     "pgcli>=4.7.1",
+    "pytest>=9.1.1",
 ]

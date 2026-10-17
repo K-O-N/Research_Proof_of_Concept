@@ -4,6 +4,8 @@ import sqlalchemy
 import psycopg2
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 
 from sqlalchemy import URL, create_engine, inspect, text
 
@@ -12,11 +14,23 @@ SOURCE_SCHEMAS = ["lab_alpha", "lab_beta", "lab_gamma"]
 TARGET_SCHEMA = "staging"
 
 
+# Create a SQLAlchemy engine for PostgreSQL using psycopg2
+
+
 def get_engine():
-    return create_engine( 'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch')
+    return create_engine(
+        URL.create(
+            "postgresql+psycopg2",
+            username=os.getenv("PG_USER"),
+            password=os.getenv("PG_PASSWORD"),
+            host="pgdatabase",
+            port=5432,
+            database=os.getenv("PG_DB", "oxresearch"),
+        )
+    )
 
 
-
+# Clean column names to lowercase snake_case and remove special characters
 def clean_column_name(name):
     """Convert column names to lowercase snake_case."""
     name = str(name).strip().lower()
@@ -24,12 +38,14 @@ def clean_column_name(name):
     return name.strip("_")
 
 
+# Clean and standardise the dataframe for each lab's dataset
 def clean_dataframe(df, schema_name, table_name):
     original_count = len(df)
 
     # Standardise column names.
     df.columns = [clean_column_name(c) for c in df.columns]
 
+    # Add to a list any duplicated columns names after cleaning and raise an error 
     if df.columns.duplicated().any():
         duplicates = df.columns[df.columns.duplicated()].tolist()
         raise ValueError(
@@ -48,6 +64,7 @@ def clean_dataframe(df, schema_name, table_name):
         )
         df[column] = df[column].replace("", pd.NA)
 
+
     # Remove only exact duplicate rows.
     duplicate_count = int(df.duplicated().sum())
     df = df.drop_duplicates().copy()
@@ -57,7 +74,7 @@ def clean_dataframe(df, schema_name, table_name):
     # Do not assume "1", "True", and "PASS" mean the same thing
     # until the laboratory's QC rules have been confirmed.
 
-    # Beta dose is measured in micromolar.
+    # Beta dose is measured in micromolar convert to nanomolar for consistency
     if schema_name == "lab_beta" and table_name == "screening":
         if "dose_um" in df.columns:
             df["concentration_nm"] = (
@@ -104,12 +121,15 @@ def standardise_date_columns(df, schema_name, table_name):
 
     if mask.any() and "value" in df.columns:
       values = df.loc[mask, "value"].astype("string").str.strip()
+
+      # Safely parse dates, allowing mixed formats and prioritizing day-first styling
       parsed = pd.to_datetime(
           values,
           format="mixed",
           dayfirst=True,
           errors="coerce",)
 
+      # Check if any original values (invalid) failed to parse and print a warning if so
       invalid = values.notna() & parsed.isna()
       if invalid.any():
         print(
@@ -133,6 +153,7 @@ def standardise_date_columns(df, schema_name, table_name):
       values = df[column_date].astype("string").str.strip()
       parsed = pd.to_datetime( values, format="mixed",  dayfirst=True, errors="coerce", )
 
+      # Check if any original values (invalid) failed to parse and print a warning if so
       invalid = values.notna() & parsed.isna()
       if invalid.any():
         print(
@@ -140,23 +161,26 @@ def standardise_date_columns(df, schema_name, table_name):
             f"{invalid.sum()} invalid date value(s)"
         )
 
+      # Overwrite the column with clean YYYY-MM-DD strings
       df[column_date] = parsed.dt.strftime("%Y-%m-%d").astype("string")
 
   return df
 
 
 
-
-
 def main():
+    # Create the connection engine to the database
     engine = get_engine()
 
+    # Create the target schema if it doesn't exist
     with engine.begin() as connection:
         connection.execute( text(f'CREATE SCHEMA IF NOT EXISTS "{TARGET_SCHEMA}"')  )
 
+    # Initialize the database inspector to look up schemas and tables
     inspector = inspect(engine)
     total_tables = 0
 
+    # Loop through each source lab schema annd confirm it exists before processing its tables
     for schema_name in SOURCE_SCHEMAS:
         if not inspector.has_schema(schema_name):
             print(f"WARNING: Schema {schema_name} does not exist.")
@@ -169,19 +193,22 @@ def main():
 
             # Identifiers come from PostgreSQL's schema inspection.
             query = text( f'SELECT * FROM "{schema_name}"."{table_name}"' )
-
             df = pd.read_sql_query(query, engine)
+
 
             date_df = standardise_date_columns( df, schema_name, table_name )
             cleaned_df = clean_dataframe(  date_df, schema_name, table_name )
 
+            # Define the standardized target table name for the staging layer
             target_table = clean_column_name( f"stg_{schema_name}_{table_name}" )
 
+            # Write the cleaned dataframe into the target staging schema in chunks
             cleaned_df.to_sql( name=target_table, con=engine, schema=TARGET_SCHEMA, if_exists="replace", index=False, chunksize=1000, )
-
+    
             print( f"Written to {TARGET_SCHEMA}.{target_table}")
             total_tables += 1
 
+    # Clean up and close the database connection engine
     engine.dispose()
     print(f"\nCompleted: {total_tables} source tables processed.")
 

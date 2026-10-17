@@ -1,16 +1,26 @@
 import json
 import os
+import pandas as pd
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from dotenv import load_dotenv
+load_dotenv()
 
-import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, URL
+
 
 TARGET_SCHEMA = "gold"
 STAGING_SCHEMA = "staging"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    'postgresql+psycopg2://researchlab:researchlab@pgdatabase:5432/oxresearch',)
+
+
+DATABASE_URL = URL.create(
+    "postgresql+psycopg2",
+    username=os.getenv("PG_USER"),
+    password=os.getenv("PG_PASSWORD"),
+    host="pgdatabase",
+    port=5432,
+    database=os.getenv("PG_DB", "oxresearch"),
+)
 
 
 
@@ -70,7 +80,6 @@ CREATE TABLE IF NOT EXISTS gold.dim_assay (
 CREATE TABLE IF NOT EXISTS gold.fact_screening_result (
     screening_result_key BIGSERIAL PRIMARY KEY,
     source_record_id TEXT NOT NULL UNIQUE,
-    source_table TEXT NOT NULL,
     compound_key BIGINT NOT NULL REFERENCES gold.dim_compound(compound_key),
     lab_key BIGINT NOT NULL REFERENCES gold.dim_lab(lab_key),
     assay_key BIGINT NOT NULL REFERENCES gold.dim_assay(assay_key),
@@ -86,7 +95,6 @@ CREATE TABLE IF NOT EXISTS gold.fact_screening_result (
     source_plate TEXT,
     source_well TEXT,
     is_replicate BOOLEAN NOT NULL DEFAULT FALSE,
-    source_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -109,6 +117,7 @@ CREATE TABLE IF NOT EXISTS gold.quarantined_records (
 
 
 def is_missing(value):
+    """Safely check if a value is null, None, or missing across different data types."""
     if value is None:
         return True
     try:
@@ -118,6 +127,7 @@ def is_missing(value):
 
 
 def val(row, *names, default=None):
+    """Look through multiple alternative column names in a row and return the first valid, non-missing value."""
     for name in names:
         if name in row and not is_missing(row[name]):
             return row[name]
@@ -125,10 +135,12 @@ def val(row, *names, default=None):
 
 
 def as_text(value):
+    """Safely convert a value to a clean string, or return None if it is missing."""
     return None if is_missing(value) else str(value).strip()
 
 
 def as_decimal(value):
+    """Safely convert a value to a high-precision Decimal type (vital for science data), returning None if invalid."""
     if is_missing(value):
         return None
     try:
@@ -138,6 +150,7 @@ def as_decimal(value):
 
 
 def as_date(value):
+    """Safely parse a date value into a standard Python date object, returning None if parsing fails."""
     if is_missing(value):
         return None
     try:
@@ -147,13 +160,13 @@ def as_date(value):
 
 
 def read_table(conn, table):
+    """Helper function to load an entire staging table from the database into a Pandas DataFrame."""
     return pd.read_sql_query(text(f'SELECT * FROM "{STAGING_SCHEMA}"."{table}"'), conn)
 
 
 
-
-
 def gamma_metadata(df):
+    """Convert Lab Gamma's vertical key-value metadata table into a clean, searchable Python dictionary."""
     if df.empty or not {"field", "value"}.issubset(df.columns):
         return {}
     return {
@@ -163,6 +176,7 @@ def gamma_metadata(df):
 
 
 def payload(row):
+    """Convert a DataFrame row into a dictionary for JSONB storage, handling dates and missing values cleanly."""
     return {str(k): (None if is_missing(v) else (v.isoformat() if hasattr(v, "isoformat") else str(v))) for k, v in row.items()}
 
 
@@ -174,6 +188,7 @@ def upsert_lab(conn, name):
     """), {"name": name}).scalar_one()
 
 
+# Define a function to upsert a target into the dimension table
 def upsert_target(conn, name):
     return conn.execute(text("""
         INSERT INTO gold.dim_target(target_name) VALUES (:name)
@@ -219,9 +234,12 @@ def upsert_assay(conn, lab_key, source_assay_id, assay_type, instrument, operato
 def resolve_compound(conn, preferred_name, smiles):
     """Match exact supplied SMILES first. No chemical canonicalisation is performed."""
     name, smiles = as_text(preferred_name), as_text(smiles)
+
+    # Path A: Process records that have a structural SMILES string
     if smiles:
         found = conn.execute(text("SELECT compound_key FROM gold.dim_compound WHERE smiles=:smiles"), {"smiles": smiles}).scalar()
         if found:
+            # Update existing record with a missing name or upgrade its identity resolution method
             conn.execute(text("""
                 UPDATE gold.dim_compound SET
                   preferred_name=COALESCE(preferred_name, :name),
@@ -230,17 +248,21 @@ def resolve_compound(conn, preferred_name, smiles):
                 WHERE compound_key=:key
             """), {"name": name, "key": found})
             return found
-        # A name-only record can be enriched with SMILES once that structure is supplied.
+        
+        # Look for an older record that previously only had a name and no SMILES
         if name:
             found = conn.execute(text("""
                 SELECT compound_key FROM gold.dim_compound
                 WHERE preferred_name=:name AND smiles IS NULL ORDER BY compound_key LIMIT 1
             """), {"name": name}).scalar()
             if found:
+                # Enrich the old name-only record by adding the newly provided SMILES string
                 conn.execute(text("""UPDATE gold.dim_compound SET smiles=:smiles,
                     identity_method='SMILES_EXACT', updated_at=now() WHERE compound_key=:key"""),
                     {"smiles": smiles, "key": found})
                 return found
+        
+        # Insert a brand new compound record or handle duplicate SMILES conflicts safely
         return conn.execute(text("""
             INSERT INTO gold.dim_compound(preferred_name, smiles, identity_method)
             VALUES (:name, :smiles, 'SMILES_EXACT')
@@ -249,6 +271,8 @@ def resolve_compound(conn, preferred_name, smiles):
               updated_at=now()
             RETURNING compound_key
         """), {"name": name, "smiles": smiles}).scalar_one()
+
+    # Path B: Fallback when no SMILES is available, matching strictly by name Check if an identical name-only record already exists without a structure
     if name:
         found = conn.execute(text("""
             SELECT compound_key FROM gold.dim_compound
@@ -256,7 +280,8 @@ def resolve_compound(conn, preferred_name, smiles):
         """), {"name": name}).scalar()
         if found:
             return found
-        # Do not attach a no-SMILES record to a different molecule merely by name.
+        
+        # Insert a new name-only record using the partial index constraint to prevent duplicates
         return conn.execute(text("""
             INSERT INTO gold.dim_compound(preferred_name, smiles, identity_method)
             VALUES (:name, NULL, 'PREFERRED_NAME_NO_SMILES')
@@ -419,25 +444,24 @@ def validate_gold_data(conn):
 
 
 
-
 def upsert_fact(conn, record):
     conn.execute(text("""
       INSERT INTO gold.fact_screening_result
-       (source_record_id, source_table, compound_key, lab_key, assay_key, target_key, date_key,
+       (source_record_id, compound_key, lab_key, assay_key, target_key, date_key,
         concentration_nm, inhibition_pct, is_out_of_range, qc_status, source_compound_id,
-        source_sample_id, source_plate, source_well, is_replicate, source_payload)
-      VALUES (:source_record_id, :source_table, :compound_key, :lab_key, :assay_key, :target_key, :date_key,
-        :concentration_nm, :inhibition_pct, :is_out_of_range, :qc_status, :source_compound_id,
-        :source_sample_id, :source_plate, :source_well, :is_replicate, CAST(:source_payload AS jsonb))
+        source_sample_id, source_plate, source_well, is_replicate)
+      VALUES (:source_record_id, :compound_key, :lab_key, :assay_key, :target_key, :date_key,
+        :concentration_nm, :inhibition_pct, :is_out_of_range, :qc_status, :source_compound_id, 
+        :source_sample_id, :source_plate, :source_well, :is_replicate)
       ON CONFLICT (source_record_id) DO UPDATE SET
-        source_table=EXCLUDED.source_table, compound_key=EXCLUDED.compound_key,
+        compound_key=EXCLUDED.compound_key,
         lab_key=EXCLUDED.lab_key, assay_key=EXCLUDED.assay_key, target_key=EXCLUDED.target_key,
         date_key=EXCLUDED.date_key, concentration_nm=EXCLUDED.concentration_nm,
         inhibition_pct=EXCLUDED.inhibition_pct, is_out_of_range=EXCLUDED.is_out_of_range,
         qc_status=EXCLUDED.qc_status, source_compound_id=EXCLUDED.source_compound_id,
         source_sample_id=EXCLUDED.source_sample_id, source_plate=EXCLUDED.source_plate,
         source_well=EXCLUDED.source_well, is_replicate=EXCLUDED.is_replicate,
-        source_payload=EXCLUDED.source_payload, updated_at=now()
+        updated_at=now()
     """), record)
 
 
@@ -466,6 +490,7 @@ def main():
         beta_meta = b_meta_df.iloc[0].to_dict() if not b_meta_df.empty else {}
         gamma_meta = gamma_metadata(g_meta_df)
 
+        # Map and standardize disparate lab metadata into a single unified configuration dictionary
         lab_info = {
           "alpha": {"name": "Alpha", "target": val(alpha_meta, "target", default="USP30"),
                     "assay_type": val(alpha_meta, "assay_type"), "instrument": val(alpha_meta, "instrument"),
@@ -487,6 +512,7 @@ def main():
         }
 
         # Registry records from all labs are used to resolve shared compounds.
+        # Build a unified in-memory lookup registry mapping lab-specific compound IDs to their names and SMILES structures
         registry = {}
         for _, r in a_comp.iterrows():
             registry[("alpha", as_text(val(r, "compound_id")))] = {
@@ -499,6 +525,7 @@ def main():
             gamma_names[as_text(val(r, "local_id"))] = as_text(val(r, "preferred_name"))
 
         # Fill missing SMILES only from an unambiguous exact preferred-name registry match.
+        # Cross-enrich missing SMILES strings using shared compound names across labs while safely flagging naming conflicts
         name_smiles = {}
         ambiguous_names = set()
         for entry in registry.values():
@@ -518,15 +545,19 @@ def main():
         for lab, info in lab_info.items():
             target_value = str(info["target"] or "").strip()
             assay_value = str(info["assay_type"] or "").strip()
+
+            # Validate lab metadata against known whitelists, print warnings for unrecognized values without halting the pipeline
             if target_value.lower() not in known_target_values:
                 print(f"WARNING: {lab} target metadata is missing or unrecognised: {target_value!r}")
             if assay_value.lower() not in known_assay_types:
                 print(f"WARNING: {lab} assay_type metadata is missing or unrecognised: {assay_value!r}")
 
+        # Upsert dimension records for labs, targets, assays, and dates, capturing their primary keys for fact insertion
         lab_keys, target_keys, assay_keys, date_keys = {}, {}, {}, {}
         for lab, info in lab_info.items():
             lab_keys[lab] = upsert_lab(conn, info["name"])
             target_name = str(info["target"] or "USP30").strip()
+
             # Conform known variants without attempting chemical/biological inference.
             if target_name.lower() in {"usp-30", "usp30", "ubiquitin specific protease 30"}:
                 target_name = "USP30"
@@ -535,7 +566,8 @@ def main():
                 info["instrument"], info["operator"], info["nominal"], info["qc_rule"], info["notes"])
             date_keys[lab] = upsert_date(conn, info["date"])
 
-        # Resolve all registry compounds before processing measurements.
+        
+        # Resolve all registered compounds against the database and cache their primary keys using a composite lookup map
         compound_keys = {}
         for (lab, local_id), entry in registry.items():
             key = resolve_compound(conn, entry["name"], entry["smiles"])
@@ -546,39 +578,48 @@ def main():
         for local_id, name in gamma_names.items():
             smiles = name_smiles.get(name) if name and name not in ambiguous_names else None
             key = resolve_compound(conn, name, smiles)
+            # If resolution succeeds, it caches the primary key in the global lookup map under Lab Gamma's local ID for later fact insertion. 
             if key is not None:
                 compound_keys[("gamma", local_id)] = key
 
-        # Detect Beta replicates by compound ID in the same source screening batch.
+        # Dynamically detect Lab Beta's compound ID column and compute occurrence counts to track test replicates
         beta_id_col = "compound" if "compound" in b_res.columns else "compound_id"
         beta_counts = b_res[beta_id_col].value_counts(dropna=True).to_dict() if beta_id_col in b_res.columns else {}
 
         # Alpha facts
         for _, r in a_res.iterrows():
+            # Convert the current DataFrame row to a dictionary and extract standard identifiers safely
             row = r.to_dict(); sid = as_text(val(row, "sample_id")); local = as_text(val(row, "compound_id"))
             rid = f"lab_alpha.assay_results:{sid or json.dumps(payload(row), sort_keys=True)}"
             ck = compound_keys.get(("alpha", local))
             reason = "Missing source compound ID" if not local else ("Compound not found in Alpha registry" if ck is None else None)
+
+            # Validate compound resolution and route records with missing or unrecognized IDs to quarantine
             if reason:
                 quarantine(conn, rid, "stg_lab_alpha_assay_results", reason, payload(row)); counts["quarantined"] += 1; continue
             inhibition = as_decimal(val(row, "inhibition_percent", "inhibition_pct"))
             conc = as_decimal(val(row, "concentration_nm"))
-            upsert_fact(conn, {"source_record_id": rid, "source_table": "stg_lab_alpha_assay_results",
+            upsert_fact(conn, {"source_record_id": rid, 
                 "compound_key": ck, "lab_key": lab_keys["alpha"], "assay_key": assay_keys["alpha"],
                 "target_key": target_keys["alpha"], "date_key": date_keys["alpha"],
                 "concentration_nm": conc, "inhibition_pct": inhibition,
                 "is_out_of_range": inhibition is not None and (inhibition < 0 or inhibition > 100),
                 "qc_status": "NOT_ASSESSED", "source_compound_id": local, "source_sample_id": sid,
-                "source_plate": None, "source_well": None, "is_replicate": False,
-                "source_payload": json.dumps(payload(row))})
+                "source_plate": None, "source_well": None, "is_replicate": False
+                })
             counts["facts_upserted"] += 1
 
         # Beta facts
         for _, r in b_res.iterrows():
             row = r.to_dict(); sid = as_text(val(row, "specimen")); local = as_text(val(row, "compound", "compound_id"))
+
+            # Generate a deterministic unique record ID using specimen ID or a fallback sorted JSON payload
             rid = f"lab_beta.screening:{sid or json.dumps(payload(row), sort_keys=True)}"
+            # Retrieve the permanent database compound primary key from Lab Beta's cache
             ck = compound_keys.get(("beta", local))
             reason = "Missing source compound ID" if not local else ("Compound ID not found in Beta registry" if ck is None else None)
+
+            # Route invalid records to quarantine, increment the error counter, and skip the current iteration
             if reason:
                 quarantine(conn, rid, "stg_lab_beta_screening", reason, payload(row)); counts["quarantined"] += 1; continue
             conc = as_decimal(val(row, "concentration_nm"))
@@ -587,15 +628,15 @@ def main():
             raw_qc = str(val(row, "qc", default="")).strip().upper()
             qc = "PASS" if raw_qc == "PASS" else ("FAIL" if raw_qc == "FAIL" else "NOT_ASSESSED")
             inhibition = as_decimal(val(row, "response", "inhibition_percent", "inhibition_pct"))
-            upsert_fact(conn, {"source_record_id": rid, "source_table": "stg_lab_beta_screening",
+
+            upsert_fact(conn, {"source_record_id": rid, 
                 "compound_key": ck, "lab_key": lab_keys["beta"], "assay_key": assay_keys["beta"],
                 "target_key": target_keys["beta"], "date_key": date_keys["beta"],
                 "concentration_nm": conc, "inhibition_pct": inhibition,
                 "is_out_of_range": inhibition is not None and (inhibition < 0 or inhibition > 100),
                 "qc_status": qc, "source_compound_id": local, "source_sample_id": sid,
                 "source_plate": None, "source_well": None,
-                "is_replicate": beta_counts.get(local, 0) > 1,
-                "source_payload": json.dumps(payload(row))})
+                "is_replicate": beta_counts.get(local, 0) > 1})
             counts["facts_upserted"] += 1
 
         # Gamma facts. Instrument-calculated Inhibition_Pct is loaded as supplied.
@@ -612,14 +653,15 @@ def main():
                 factors = {"nm": Decimal("1"), "um": Decimal("1000"), "µm": Decimal("1000"), "μm": Decimal("1000"), "pm": Decimal("0.001")}
                 conc = amount * factors[units] if amount is not None and units in factors else None
             inhibition = as_decimal(val(row, "inhibition_pct", "inhibition_percent"))
-            upsert_fact(conn, {"source_record_id": rid, "source_table": "stg_lab_gamma_plate_export",
+
+            upsert_fact(conn, {"source_record_id": rid, 
                 "compound_key": ck, "lab_key": lab_keys["gamma"], "assay_key": assay_keys["gamma"],
                 "target_key": target_keys["gamma"], "date_key": date_keys["gamma"],
                 "concentration_nm": conc, "inhibition_pct": inhibition,
                 "is_out_of_range": inhibition is not None and (inhibition < 0 or inhibition > 100),
                 "qc_status": "NOT_ASSESSED", "source_compound_id": local,
                 "source_sample_id": None, "source_plate": plate, "source_well": well,
-                "is_replicate": False, "source_payload": json.dumps(payload(row))})
+                "is_replicate": False})
             counts["facts_upserted"] += 1
 
         # Ensure the quarantine table only contains current exceptions. Successful rows are removed
